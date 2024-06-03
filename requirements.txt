@@ -1,0 +1,7 @@
+torch
+transformers
+unsloth
+trl
+datasets
+pandas
+PyMuPDF
