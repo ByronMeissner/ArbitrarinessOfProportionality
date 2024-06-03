@@ -166,9 +166,3 @@ This project includes a comprehensive dataset containing approximately 16,000 EC
 ## Scientific Paper
 
 This repository was created in conjunction with the scientific paper titled "Willkür durch Abwägung? Der Grundsatz der Verhältnismäßigkeit als Instrument rechtlicher Beliebigkeit?" For more information, refer to the paper for detailed insights and findings.
-
-# ArbitrarinessOfProportionality
-=======
-# ArbitrarinessOfProportionality
-Tools to analyze a large number of ECHR court rulings with regard to the application of the proportionality principle strictu sensu.
->>>>>>> origin/main
