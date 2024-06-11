@@ -1,111 +1,92 @@
-import os
 import json
-import pandas as pd
+import os
 import re
+import csv
+from word2number import w2n
 
-def extract_information(file_path):
-    with open(file_path, 'r', encoding='utf-8') as file:
-        data = json.load(file)
-    
-    info = {}
-    
-    # Extract country
-    country_data = data.get("country", {}).get("name", "")
-    info['country'] = country_data
-    
-    # Extract docname
-    docname_data = data.get("docname", "")
-    if "v." in docname_data:
-        info['docname'] = docname_data.split(" v.")[0]
-    else:
-        info['docname'] = docname_data
-    
-    # Extract judgementdate
-    judgementdate_data = data.get("judgementdate", "")
-    if judgementdate_data:
-        info['judgementdate'] = judgementdate_data.split()[0]
-    
-    # Extract separateopinion
-    separateopinion_data = data.get("separateopinion", "false")
-    info['separateopinion'] = separateopinion_data.lower() == "true"
-    
-    # Extract conclusion
-    conclusions = data.get("conclusion", [])
-    conclusion_articles = []
-    conclusion_types = []
-    for conclusion in conclusions:
-        article = conclusion.get("base_article", "")
-        if article.isdigit():  # Check if the article is a number
-            conclusion_articles.append(article)
+def extract_vote_ratio(json_data):
+    def words_to_numbers(words):
+        try:
+            return w2n.word_to_num(words)
+        except:
+            return None
+
+    def extract_majority_patterns(content):
+        patterns = [
+            r'by (\w+) votes? to (\w+)\b.*?violation',
+            r'by (\w+) votes? to (\w+)\b.*?no violation',
+            r'holds by (\w+) votes? to (\w+)\b.*?violation',
+            r'holds by (\w+) votes? to (\w+)\b.*?no violation',
+            r'by (\w+) votes? to (\w+)\b.*?no breach',
+            r'holds by (\w+) votes? to (\w+)\b.*?breach',
+            r'Holds by (\w+) votes? to (\w+)'
+        ]
+
+        majority_votes = []
+        minority_votes = []
+
+        for pattern in patterns:
+            matches = re.findall(pattern, content, re.IGNORECASE)
+            for match in matches:
+                major = words_to_numbers(match[0])
+                minor = words_to_numbers(match[1])
+                if major is not None and minor is not None:
+                    majority_votes.append(major)
+                    minority_votes.append(minor)
         
-        # Check for types "violation" or "no-violation"
-        ctype = conclusion.get("type", "").lower()
-        if ctype in ["violation", "no-violation"]:
-            conclusion_types.append(ctype)
-    
-    info['conclusion_articles'] = conclusion_articles
-    info['conclusion_types'] = conclusion_types
-    
-    # Search content for majority patterns
-    content_sections = data.get("content", {})
-    majority_patterns = [
-        r'(Holds|Rejects|Finds|Declares|Decides) by (\w+) votes? to (\w+) that (there has been a violation of Article|there has been no violation of Article)',
-        r'by (\w+) votes? to (\w+),? that (there has been a violation of Article|there has been no violation of Article)',
-        r'Holds by (\w+) votes? to (\w+) that (there has been a violation of Article|there has been no violation of Article)',
-        r'(Holds|Rejects|Finds|Declares|Decides) by (\w+) votes? to (\w+) (that|there has been|there has been no)',
-        r'by (\w+) votes? to (\w+),? (that|there has been|there has been no)',
-        r'Holds by (\w+) votes? to (\w+) (that|there has been|there has been no)'
-    ]
-    
-    content_text = json.dumps(content_sections)
-    dissenting = False
+        return majority_votes, minority_votes
+
     vote_ratio = 0
-    matched_sentences = []
-    
-    for pattern in majority_patterns:
-        matches = re.findall(pattern, content_text, re.IGNORECASE)
-        for match in matches:
-            if len(match) >= 3:
-                matched_sentences.append(match)
-    
-    if matched_sentences:
-        dissenting = True
-        # Using the first match for demonstration; this can be adjusted as needed
-        first_match = matched_sentences[0]
-        major_votes_str = first_match[1].lower()
-        minor_votes_str = first_match[2].lower()
-        
-        num_dict = {
-            'one': 1, 'two': 2, 'three': 3, 'four': 4, 'five': 5, 'six': 6, 'seven': 7, 'eight': 8, 'nine': 9,
-            'ten': 10, 'eleven': 11, 'twelve': 12, 'thirteen': 13, 'fourteen': 14, 'fifteen': 15, 'sixteen': 16,
-            'seventeen': 17
-        }
-        
-        major_votes = num_dict.get(major_votes_str)
-        minor_votes = num_dict.get(minor_votes_str)
-        
-        if major_votes is not None and minor_votes is not None:
-            vote_ratio = minor_votes / (major_votes + minor_votes)
-    
-    info['dissenting'] = dissenting
-    info['vote_ratio'] = vote_ratio
-    
-    return info
+    majority_votes = []
+    minority_votes = []
 
-def main():
-    folder_path = ''
-    data_list = []
+    content_sections = json_data.get("content", {}).values()
+    for sections in content_sections:
+        for section in sections:
+            if isinstance(section, dict):
+                elements = section.get("elements", [])
+                for element in elements:
+                    text = element.get("content", "")
+                    major_votes, minor_votes = extract_majority_patterns(text)
+                    if major_votes and minor_votes:
+                        majority_votes.extend(major_votes)
+                        minority_votes.extend(minor_votes)
 
-    for file_name in os.listdir(folder_path):
-        if file_name.endswith(".json"):
-            file_path = os.path.join(folder_path, file_name)
-            data = extract_information(file_path)
-            if data is not None:  # Only add if data is not None
-                data['file_name'] = file_name  # Add the file name to the data dictionary
-                data_list.append(data)
-    
-    df = pd.DataFrame(data_list)
-    df.to_csv('', index=False)
+    if majority_votes and minority_votes:
+        ratios = [minor/major for minor, major in zip(minority_votes, majority_votes) if major != 0]
+        vote_ratio = sum(ratios) / len(ratios) if ratios else 0
 
-if __name__ == "__main__":
-    main()
+    return vote_ratio
+
+def process_files(input_directory, output_file):
+    results = []
+
+    for filename in os.listdir(input_directory):
+        if filename.endswith(".json"):
+            filepath = os.path.join(input_directory, filename)
+            with open(filepath, 'r', encoding='utf-8') as file:
+                json_data = json.load(file)
+                vote_ratio = extract_vote_ratio(json_data)
+                results.append({
+                    'filename': filename,
+                    'vote_ratio': vote_ratio
+                })
+
+    with open(output_file, 'w', newline='', encoding='utf-8') as csvfile:
+        fieldnames = ['filename', 'vote_ratio']
+        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+        writer.writeheader()
+        for result in results:
+            writer.writerow(result)
+
+input_directory = ""
+output_file = ""
+process_files(input_directory, output_file)
+print(f"CSV file has been created successfully at {output_file}.")
+
+
+
+
+
+
+
